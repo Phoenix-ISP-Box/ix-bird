@@ -1,0 +1,15 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install BIRD 2 and PyYAML
+        run: sudo apt-get update -q && sudo apt-get install -y -q bird2 python3-yaml
+      - name: Unit tests
+        run: python3 -m unittest -v
+      - name: Parse generated config with BIRD
+        run: tests/bird-parse.sh /usr/sbin/bird
+      - name: Shell syntax
+        run: sh -n tools/ix-bird-apply && sh -n tools/bgp && sh -n tests/bird-parse.sh

@@ -1,0 +1,17 @@
+# A customer that peers with us: we announce the CACHE subnets, it announces its prefix.
+name: Example Bgp Networks
+prefixes:
+  - 203.0.113.0/24
+lanes:
+  - service: CACHE
+    table: 201
+    vlan: 3001
+    parentif: bond0
+    local: 10.30.1.1/30
+    peer: 10.30.1.2
+    rate: 1000Mbit
+    routing: bgp
+    bgp:
+      peer_as: 64510             # local_as comes from the service (64500)
+      fallback: static           # keep the route on the lane while the session is down (default)
+      # max_prefix: 10           # optional import limit; plain session without it

@@ -1,0 +1,25 @@
+# Services = what the router delivers to customers: usually an on-net cache behind another router or VRF.
+# Every address here is from the documentation ranges (RFC 5737) and documentation ASNs (RFC 5398).
+services:
+  CACHE:
+    local_as: 64500              # AS presented to customers on BGP lanes of this service
+    nexthop: 192.0.2.1           # cache gateway seen from this router; announcements follow its reachability
+    sources:                     # cache source subnets: replies from these are steered per lane (ip rule from)
+      - 198.51.100.0/27
+      - 198.51.100.64/27
+    # announce: defaults to sources
+
+  VIDEO:
+    local_as: 64501
+    nexthop: 192.0.2.5
+    sources:
+      - 198.51.100.128/26
+
+# Never accepted from a customer and never a customer prefix: your own space and anything else you protect.
+# (Default route, RFC 1918, CGNAT, loopback, link-local and multicast are always denied.)
+deny:
+  - 198.51.100.0/24              # the caches themselves
+  - 192.0.2.0/25                 # router links toward the caches
+
+# Kernel tables the generator must never hand out (0, 253, 254, 255 are always reserved).
+reserved_tables: [999]

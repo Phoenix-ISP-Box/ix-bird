@@ -1,0 +1,31 @@
+#!/bin/sh
+# bgp — Cisco-style view of the customer BGP sessions (BIRD). Part of ix-bird (Phoenix-ISP-Box/ix-bird)
+#   bgp                    summary of every customer session (like "show ip bgp summary")
+#   bgp <customer>         neighbour detail                  (like "show ip bgp neighbors X")
+#   bgp <customer> rec     prefixes received + accepted/filtered (like "... received-routes")
+#   bgp <customer> adv     prefixes advertised               (like "... advertised-routes")
+# <customer> = part of the name, e.g. example (matches bgp_<service>_<customer>).
+C="${BIRDC:-birdc}"
+
+protos() { $C show protocols | awk '$1 ~ /^bgp_/ {print $1}' | grep -i -- "${1:-.}"; }
+
+summary() {
+  printf '%-28s %-15s %-7s %-6s %-12s %-12s %4s %4s %4s\n' Session Neighbor AS LocAS State Since Rcv Acc Adv
+  for p in $(protos); do
+    $C show protocols all "$p" | awk -v p="$p" '
+      /Neighbor address:/ {nb=$3} /Neighbor AS:/ {as=$3} /Local AS:/ {la=$3}
+      /BGP state:/ {st=$3} /Routes:/ {acc=$2; filt=$4; adv=$6}
+      $1==p && $2=="BGP" {since=$5}
+      END {printf "%-28s %-15s %-7s %-6s %-12s %-12s %4s %4s %4s\n", p, nb, as, la, st, since, acc+filt, acc+0, adv+0}'
+  done
+}
+
+case "$2" in
+  "")  if [ -z "$1" ]; then summary; else for p in $(protos "$1"); do $C show protocols all "$p" | sed 1d; done; fi ;;
+  rec) for p in $(protos "$1"); do
+         echo "== $p received, accepted:"; $C show route protocol "$p" | sed 1d
+         echo "== $p received, filtered (rejected by policy):"; $C show route filtered protocol "$p" | sed 1d
+       done ;;
+  adv) for p in $(protos "$1"); do echo "== $p advertised:"; $C show route export "$p" | sed 1d; done ;;
+  *)   sed -n '2,7p' "$0" ;;
+esac

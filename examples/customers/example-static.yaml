@@ -1,0 +1,17 @@
+# A customer without BGP: two services, static routes, each lane shaped on its own VLAN.
+name: Example Static Isp
+prefixes:
+  - 192.0.2.128/29
+lanes:
+  - service: CACHE
+    table: 202
+    vlan: 3002
+    local: 10.30.2.1/30
+    peer: 10.30.2.2
+    rate: 300Mbit
+  - service: VIDEO
+    table: 203
+    vlan: 3003
+    local: 10.30.3.1/30
+    peer: 10.30.3.2
+    rate: 200Mbit

@@ -1,0 +1,92 @@
+#!/bin/sh
+# ix-bird-apply — install or remove one customer on the router (POSIX sh / busybox ash).
+#
+#   ix-bird-apply install <slug>   run <slug>.sh, then install <slug>.bird (parse-checked) and reload BIRD
+#   ix-bird-apply remove  <slug>   take the customer out of BIRD, flush its BIRD routes, delete its rules/VLANs
+#   ix-bird-apply check            parse the current BIRD configuration
+#
+# Files come from $IXBIRD_SRC (default: current directory): <slug>.sh, <slug>.bird, common.conf.
+# Environment: BIRD_DIR (/etc/bird), BIRD_CONF ($BIRD_DIR/bird.conf), BIRD_BIN (bird), BIRDC (birdc),
+#              CFG_DIR (/etc) where <slug>.sh is kept as <slug>.cfg for boot.
+set -u
+BIRD_DIR=${BIRD_DIR:-/etc/bird}
+BIRD_CONF=${BIRD_CONF:-$BIRD_DIR/bird.conf}
+BIRD_BIN=${BIRD_BIN:-bird}
+BIRDC=${BIRDC:-birdc}
+CFG_DIR=${CFG_DIR:-/etc}
+SRC=${IXBIRD_SRC:-.}
+CUST_DIR=$BIRD_DIR/customers
+
+die() { echo "ix-bird-apply: $*" >&2; exit 1; }
+
+check() { $BIRD_BIN -p -c "$BIRD_CONF"; }
+
+reload() {
+  out=$($BIRDC configure 2>&1)
+  echo "$out"
+  echo "$out" | grep -qE "Reconfigured|Reconfiguration in progress"
+}
+
+install_common() {
+  mkdir -p "$CUST_DIR"
+  [ -f "$CUST_DIR/00_placeholder.conf" ] || echo "# keeps the include glob non-empty" > "$CUST_DIR/00_placeholder.conf"
+  if [ -f "$SRC/common.conf" ]; then cp "$SRC/common.conf" "$BIRD_DIR/ixbird-common.conf"; fi
+  grep -q "ix-bird includes" "$BIRD_CONF" || cat >> "$BIRD_CONF" <<EOF
+
+# ---- ix-bird includes (customer lanes) ----
+include "$BIRD_DIR/ixbird-common.conf";
+include "$CUST_DIR/*.conf";
+EOF
+}
+
+install() {
+  s=$1
+  [ -f "$SRC/$s.sh" ] || die "$SRC/$s.sh not found"
+  cp "$SRC/$s.sh" "$CFG_DIR/$s.cfg"
+  sh "$CFG_DIR/$s.cfg"
+  dst=$CUST_DIR/$s.conf
+  if [ -f "$SRC/$s.bird" ]; then
+    install_common
+    [ -f "$dst" ] && cp "$dst" "$dst.bak"
+    cp "$SRC/$s.bird" "$dst.new" && mv "$dst.new" "$dst"
+    if ! check; then
+      mv "$dst" "$dst.bad"
+      [ -f "$dst.bak" ] && mv "$dst.bak" "$dst"
+      die "BIRD rejected $s.bird (kept as $dst.bad); running configuration unchanged"
+    fi
+    reload || die "birdc configure failed"
+  elif [ -f "$dst" ]; then
+    unbird "$s"
+  fi
+  echo "ix-bird-apply: $s installed"
+}
+
+unbird() {
+  dst=$CUST_DIR/$1.conf
+  [ -f "$dst" ] || return 0
+  tables=$(grep -oE 'kernel table [0-9]+' "$dst" | awk '{print $3}')
+  mv "$dst" "$dst.off"
+  reload || die "birdc configure failed"
+  for t in $tables; do ip route flush table "$t" proto bird 2>/dev/null; done
+}
+
+remove() {
+  s=$1
+  unbird "$s"
+  f=$CFG_DIR/$s.cfg
+  [ -f "$f" ] || { echo "ix-bird-apply: no $f, BIRD part removed"; return 0; }
+  for t in $(grep -oE '^ip rule add from [^ ]+ table [0-9]+' "$f" | awk '{print $NF}' | sort -u); do
+    while ip rule del table "$t" 2>/dev/null; do :; done
+    ip route flush table "$t" 2>/dev/null
+  done
+  for d in $(grep -oE '^ip link add link [^ ]+ name [^ ]+' "$f" | awk '{print $7}'); do ip link del "$d" 2>/dev/null; done
+  mv "$f" "$f.off"
+  echo "ix-bird-apply: $s removed (cfg kept as $f.off)"
+}
+
+case "${1:-}" in
+  install) [ -n "${2:-}" ] || die "usage: install <slug>"; install "$2" ;;
+  remove)  [ -n "${2:-}" ] || die "usage: remove <slug>"; remove "$2" ;;
+  check)   check && echo "ix-bird-apply: BIRD configuration OK" ;;
+  *)       sed -n '2,11p' "$0"; exit 2 ;;
+esac
